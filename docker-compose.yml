@@ -1,0 +1,13 @@
+services:
+  bot:
+    build: .
+    container_name: discord-translator
+    restart: unless-stopped
+    env_file: .env
+    init: true
+    volumes:
+      # Именованный volume: база data/bot.db переживает пересборку и перезапуск контейнера
+      - bot-data:/app/data
+
+volumes:
+  bot-data:

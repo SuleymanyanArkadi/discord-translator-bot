@@ -4,6 +4,8 @@ import { log } from '../logger.js';
 import { isSameLanguage } from '../languages.js';
 import { DeepLProvider } from './deepl.js';
 import { GoogleProvider } from './google.js';
+import { VitaletsProvider } from './vitalets.js';
+import { MyMemoryProvider } from './mymemory.js';
 import { LRUCache } from './lru.js';
 import { TranslationError } from './errors.js';
 
@@ -11,6 +13,11 @@ export { TranslationError };
 
 export const FAILURE_MESSAGE =
   'Не удалось перевести: сервисы перевода сейчас недоступны. Попробуйте ещё раз чуть позже.';
+
+/** Ответ «слишком много запросов» (HTTP 429) — провайдер стоит временно не трогать. */
+export function isTooManyRequests(err) {
+  return err?.status === 429 || err?.statusCode === 429 || /\b429\b|too many requests/i.test(err?.message ?? '');
+}
 
 export function cacheKey(text, targetLang) {
   return `${createHash('sha1').update(text).digest('hex')}:${targetLang}`;
@@ -20,7 +27,16 @@ export function cacheKey(text, targetLang) {
  * Создаёт переводчик с цепочкой провайдеров (по порядку приоритета) и LRU-кэшем.
  * Провайдер: { name, isAvailable(), supports(lang): Promise<bool>, translate(text, lang): Promise<{text, sourceLang}> }
  */
-export function createTranslator({ providers, cache = new LRUCache(config.cacheSize), logger = log }) {
+export function createTranslator({
+  providers,
+  cache = new LRUCache(config.cacheSize),
+  logger = log,
+  cooldownMs = 10 * 60 * 1000,
+  now = Date.now,
+}) {
+  // После 429 провайдер пропускается cooldownMs, чтобы не продлевать блокировку по IP.
+  const pausedUntil = new Map();
+
   async function translate(text, targetLang) {
     const source = String(text ?? '');
     if (!source.trim()) return { text: source, sourceLang: null, provider: null };
@@ -31,7 +47,7 @@ export function createTranslator({ providers, cache = new LRUCache(config.cacheS
 
     const causes = [];
     for (const provider of providers) {
-      if (!provider.isAvailable()) continue;
+      if (!provider.isAvailable() || now() < (pausedUntil.get(provider) ?? 0)) continue;
       let ok = false;
       try {
         ok = await provider.supports(targetLang);
@@ -46,6 +62,10 @@ export function createTranslator({ providers, cache = new LRUCache(config.cacheS
         return result;
       } catch (err) {
         causes.push(err);
+        if (isTooManyRequests(err)) {
+          pausedUntil.set(provider, now() + cooldownMs);
+          logger.warn(`${provider.name}: 429, пропускаем его ${Math.round(cooldownMs / 60000)} мин.`);
+        }
         logger.warn(`${provider.name}: ошибка перевода на ${targetLang}, пробуем следующий провайдер:`, err.message);
       }
     }
@@ -59,7 +79,13 @@ let defaultTranslator = null;
 
 export function getTranslator() {
   defaultTranslator ??= createTranslator({
-    providers: [new DeepLProvider({ apiKey: config.deeplApiKey }), new GoogleProvider()],
+    // Порядок = приоритет: DeepL, Google через @vitalets, запасной эндпоинт Google (gtx), MyMemory.
+    providers: [
+      new DeepLProvider({ apiKey: config.deeplApiKey }),
+      new VitaletsProvider(),
+      new GoogleProvider(),
+      new MyMemoryProvider({ email: config.myMemoryEmail }),
+    ],
   });
   return defaultTranslator;
 }

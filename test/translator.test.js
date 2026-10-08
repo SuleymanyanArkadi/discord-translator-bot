@@ -145,3 +145,20 @@ test('GoogleProvider: HTTP-ошибка превращается в исключ
   const g = new GoogleProvider({ fetchImpl: async () => ({ ok: false, status: 429 }) });
   await assert.rejects(g.translate('hi', 'ru'), /429/);
 });
+
+test('после 429 провайдер временно пропускается', async () => {
+  let now = 0;
+  const google = mockProvider('Google', {
+    translate: () => {
+      throw Object.assign(new Error('Too Many Requests'), { status: 429 });
+    },
+  });
+  const backup = mockProvider('MyMemory');
+  const t = createTranslator({ providers: [google, backup], cache: new LRUCache(10), logger: silent, cooldownMs: 1000, now: () => now });
+  assert.equal((await t.translate('a', 'ru')).provider, 'MyMemory');
+  assert.equal((await t.translate('b', 'ru')).provider, 'MyMemory');
+  assert.equal(google.calls, 1); // во второй раз Google не трогали
+  now = 1001;
+  await t.translate('c', 'ru');
+  assert.equal(google.calls, 2); // пауза закончилась
+});

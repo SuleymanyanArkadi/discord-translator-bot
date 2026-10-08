@@ -16,6 +16,7 @@ export const config = {
   clientId: env('CLIENT_ID'),
   guildId: env('GUILD_ID'),
   deeplApiKey: env('DEEPL_API_KEY'),
+  myMemoryEmail: env('MYMEMORY_EMAIL'),
   buttonTimeoutMs: positiveInt(process.env.BUTTON_TIMEOUT_SECONDS, 7) * 1000,
   dbPath: env('DB_PATH') || path.join(ROOT_DIR, 'data', 'bot.db'),
   defaultLang: 'en',

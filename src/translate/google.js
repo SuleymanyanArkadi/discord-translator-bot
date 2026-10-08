@@ -7,7 +7,7 @@ const CHUNK_SIZE = 800;
 
 /** Бесплатный Google Translate без ключа (публичный эндпоинт client=gtx). */
 export class GoogleProvider {
-  name = 'Google Translate';
+  name = 'Google Translate (gtx)';
 
   constructor({ fetchImpl = globalThis.fetch, timeoutMs = 10_000 } = {}) {
     this.fetch = fetchImpl;
